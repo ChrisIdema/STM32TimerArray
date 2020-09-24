@@ -161,7 +161,29 @@ void TimerArrayControl::begin(){
     timerFeed.htim->Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE; // by disabling, write to ARR shadow regs happens immedietely
     #endif
     timerFeed.htim->Init.Period = timerFeed.max_count; // set max period for maximum amount of possible delay
-    timerFeed.htim->Init.Prescaler = prescaler - 1; // prescaler divides clock by Prescaler+1
+
+    uint32_t prescaler;
+    
+
+    if(clkdiv > max_prescale*4){
+        m_software_prescaler = 8;
+        prescaler = max_prescale/8-1;
+    }
+    else if(clkdiv > max_prescale*2){
+        m_software_prescaler = 4;
+        prescaler = clkdiv/4-1;
+    }
+    else if(clkdiv > max_prescale){
+        m_software_prescaler = 2;
+        prescaler = clkdiv/2-1;
+    }
+    else{
+        m_software_prescaler = 1;
+        prescaler = clkdiv-1;
+    }
+
+    timerFeed.htim->Init.Prescaler = prescaler;
+
 
     TIM_OC_InitTypeDef oc_init;
     oc_init.OCMode = TIM_OCMODE_TIMING;
@@ -204,7 +226,7 @@ void TimerArrayControl::tick(){
         if (timer->_periodic){
 
             // set new target for timer
-            uint32_t target = COUNTER_MODULO(timer->target + timer->_delay);
+            uint32_t target = COUNTER_MODULO(timer->target + timer->_delay*m_software_prescaler);
 
             // find fitting place for timer in string
             timerFeed.updateTimerTarget(timer, target);
@@ -236,7 +258,7 @@ void TimerArrayControl::registerAttachedTimer(Timer* timer){
     if (timer->running) return;
 
     // get current time in ticks and add the requested delay to find the target time
-    timer->target = COUNTER_MODULO(timer->_delay + timerFeed.cnt);
+    timer->target = COUNTER_MODULO(timer->_delay*m_software_prescaler + timerFeed.cnt);
 
     // insert timer based on the target time
     timerFeed.insertTimer(timer);
@@ -256,15 +278,15 @@ void TimerArrayControl::registerDelayChange(Timer* timer, uint32_t delay){
 
     uint32_t target;
     
-    if (elapsedTicks(timer) > delay){
+    if (elapsedTicks(timer) > (delay*m_software_prescaler)){
         // according to the new delay the timer should have been fired, fire it immedietely
         timer->fire(); // firing will ruin timer synchrony
-        target = COUNTER_MODULO(timerFeed.cnt + delay); // new target is counted from now
+        target = COUNTER_MODULO(timerFeed.cnt + (delay*m_software_prescaler)); // new target is counted from now
     } else {
         // the timer will be fired in the future
         // since the target will certainly increase, delay - timer->delay is positive,
         // no special handling is needed
-        target = COUNTER_MODULO(timer->target + delay - timer->_delay);
+        target = COUNTER_MODULO(timer->target + (delay - timer->_delay)*m_software_prescaler);
     }
 
     timer->_delay = delay;
@@ -280,8 +302,8 @@ void TimerArrayControl::registerAttachedTimerInSync(Timer* timer, Timer* referen
 
     // TODO: negative calculation might be also needed, for more complicated cases
     // put start time in timer's target, find the next firing time with timer's delay
-    timer->target = COUNTER_MODULO(reference->target - reference->_delay);
-    timer->target = timerFeed.calculateNextFireInSync(timer->target, timer->_delay);
+    timer->target = COUNTER_MODULO(reference->target - reference->_delay*m_software_prescaler);
+    timer->target = timerFeed.calculateNextFireInSync(timer->target, timer->_delay*m_software_prescaler);
 
     // find fitting place for timer in string
     timerFeed.insertTimer(timer);
@@ -429,12 +451,17 @@ uint32_t TimerArrayControl::remainingTicks(Timer* timer) const {
     return COUNTER_MODULO(timer->target - cnt);
 }
 
-uint32_t TimerArrayControl::elapsedTicks(Timer* timer) const {
-    if (!timer->running) return 0;
-    return timer->_delay - remainingTicks(timer);
+uint32_t TimerArrayControl::get_ticks() const{
+    return __HAL_TIM_GET_COUNTER(timerFeed.htim);
 }
 
+uint32_t TimerArrayControl::elapsedTicks(Timer* timer) const {
+    if (!timer->running) return 0;
+    return timer->_delay*m_software_prescaler - remainingTicks(timer);
+}
+
+// todo: implement
 float TimerArrayControl::actualTickFrequency() const {
-    return ((float)fclk)/prescaler;
+    return 0;//((float)fclk)/prescaler;
 }
 

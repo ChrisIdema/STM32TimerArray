@@ -45,6 +45,7 @@ public:
 
     uint32_t remainingTicks(Timer* timer) const;
     uint32_t elapsedTicks(Timer* timer) const;
+    uint32_t get_ticks() const;
     float actualTickFrequency() const;
     bool isRunning() const;
 
@@ -53,9 +54,9 @@ public:
 
     const uint32_t fclk;
     const uint32_t clkdiv;
-    const uint32_t prescaler = clkdiv > max_prescale ? max_prescale : clkdiv;
 
 protected:
+    uint32_t m_software_prescaler=1;
     struct TimerFeed{
         Timer root;
         TIM_HandleTypeDef *const htim;
